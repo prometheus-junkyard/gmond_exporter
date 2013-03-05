@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"time"
+	"strings"
 )
 
 const (
@@ -103,7 +104,8 @@ func fetchMetrics(gmond_reader io.Reader) {
 		for _, host := range cluster.Hosts {
 
 			for _, metric := range host.Metrics {
-				if _, ok := gaugePerGangliaMetrics[metric.Name]; !ok {
+				name := strings.ToLower(metric.Name)
+				if _, ok := gaugePerGangliaMetrics[name]; !ok {
 					var desc string
 					var title string
 					for _, element := range metric.ExtraData.ExtraElements {
@@ -118,15 +120,15 @@ func fetchMetrics(gmond_reader io.Reader) {
 						}
 					}
 					gauge := metrics.NewGauge()
-					gaugePerGangliaMetrics[metric.Name] = gauge
-					registry.DefaultRegistry.Register(metric.Name, desc, registry.NilLabels, gauge) // one gauge per metric!
+					gaugePerGangliaMetrics[name] = gauge
+					registry.DefaultRegistry.Register(name, desc, registry.NilLabels, gauge) // one gauge per metric!
 				}
 
 				var labels = map[string]string{
 					"hostname": host.Name,
 					"cluster":  cluster.Name,
 				}
-				gaugePerGangliaMetrics[metric.Name].Set(labels, metric.Value)
+				gaugePerGangliaMetrics[name].Set(labels, metric.Value)
 			}
 		}
 	}
