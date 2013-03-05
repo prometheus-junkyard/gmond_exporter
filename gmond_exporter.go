@@ -18,8 +18,8 @@ const (
 )
 
 var (
-  listeningAddress      = flag.String("listeningAddress", ":8080", "Address on which to expose JSON metrics.")
-  metricsEndpoint       = flag.String("metricsEndpoint", "/metrics.json", "Path under which to expose JSON metrics.")
+	listeningAddress      = flag.String("listeningAddress", ":8080", "Address on which to expose JSON metrics.")
+	metricsEndpoint       = flag.String("metricsEndpoint", "/metrics.json", "Path under which to expose JSON metrics.")
 	gangliaAddress        = flag.String("gangliaAddress", "ganglia:8649", "gmond address.")
 	gangliaScrapeInterval = flag.Int("gangliaScrapeInterval", 60, "Interval in seconds between scrapes.")
 )
@@ -81,8 +81,8 @@ func init() {
 func serveStatus() {
 	exporter := registry.DefaultRegistry.Handler()
 
-  http.Handle(*metricsEndpoint, exporter)
-  http.ListenAndServe(*listeningAddress, nil)
+	http.Handle(*metricsEndpoint, exporter)
+	http.ListenAndServe(*listeningAddress, nil)
 }
 
 func toUtf8(charset string, input io.Reader) (io.Reader, error) {
@@ -99,13 +99,11 @@ func fetchMetrics(gmond_reader io.Reader) {
 		log.Fatalf("Error: Couldn't parse xml: %s", err)
 	}
 
-	var metricsUsed []string
 	for _, cluster := range ganglia.Clusters {
 		for _, host := range cluster.Hosts {
 
 			for _, metric := range host.Metrics {
 				if _, ok := gaugePerGangliaMetrics[metric.Name]; !ok {
-					metricsUsed = append(metricsUsed, metric.Name) // keep track metrics we actually update
 					var desc string
 					var title string
 					for _, element := range metric.ExtraData.ExtraElements {
@@ -132,22 +130,6 @@ func fetchMetrics(gmond_reader io.Reader) {
 			}
 		}
 	}
-
-	for metricGlobal, _ := range gaugePerGangliaMetrics {
-		if !isIn(metricGlobal, metricsUsed) {
-			log.Printf("%s not in use anymore, deleting", metricGlobal)
-			delete(gaugePerGangliaMetrics, metricGlobal)
-		}
-	}
-}
-
-func isIn(element string, list []string) bool {
-	for _, e := range list {
-		if e == element {
-			return true
-		}
-	}
-	return false
 }
 
 func main() {
