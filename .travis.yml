@@ -1,0 +1,8 @@
+language: go
+
+before_script:
+ - go get -v github.com/prometheus/gmond_exporter
+
+script:
+ - go build -a -v github.com/prometheus/gmond_exporter/...
+ - go test -v github.com/prometheus/gmond_exporter/...
