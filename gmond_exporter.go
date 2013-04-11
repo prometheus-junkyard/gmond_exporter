@@ -10,8 +10,8 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"time"
 	"strings"
+	"time"
 )
 
 const (
@@ -19,6 +19,7 @@ const (
 )
 
 var (
+	verbose               = flag.Bool("verbose", false, "Verbose output.")
 	listeningAddress      = flag.String("listeningAddress", ":8080", "Address on which to expose JSON metrics.")
 	metricsEndpoint       = flag.String("metricsEndpoint", "/metrics.json", "Path under which to expose JSON metrics.")
 	gangliaAddress        = flag.String("gangliaAddress", "ganglia:8649", "gmond address.")
@@ -79,6 +80,12 @@ func init() {
 	gaugePerGangliaMetrics = make(map[string]metrics.Gauge)
 }
 
+func debug(format string, a ...interface{}) {
+	if *verbose {
+		log.Printf(format, a...)
+	}
+}
+
 func serveStatus() {
 	exporter := registry.DefaultRegistry.Handler()
 
@@ -87,10 +94,10 @@ func serveStatus() {
 }
 
 func toUtf8(charset string, input io.Reader) (io.Reader, error) {
-	return input, nil
+	return input, nil //FIXME
 }
 
-func fetchMetrics(gmond_reader io.Reader) {
+func fetchMetrics(gmond_reader io.Reader) (updates int) {
 	ganglia := Ganglia{}
 	decoder := xml.NewDecoder(gmond_reader)
 	decoder.CharsetReader = toUtf8
@@ -99,7 +106,6 @@ func fetchMetrics(gmond_reader io.Reader) {
 	if err != nil {
 		log.Fatalf("Error: Couldn't parse xml: %s", err)
 	}
-
 	for _, cluster := range ganglia.Clusters {
 		for _, host := range cluster.Hosts {
 
@@ -119,6 +125,7 @@ func fetchMetrics(gmond_reader io.Reader) {
 							break
 						}
 					}
+					debug("New metric: %s (%s)", name, desc)
 					gauge := metrics.NewGauge()
 					gaugePerGangliaMetrics[name] = gauge
 					registry.DefaultRegistry.Register(name, desc, registry.NilLabels, gauge) // one gauge per metric!
@@ -128,10 +135,13 @@ func fetchMetrics(gmond_reader io.Reader) {
 					"hostname": host.Name,
 					"cluster":  cluster.Name,
 				}
+				debug("%s{%s} = %f", name, labels, metric.Value)
 				gaugePerGangliaMetrics[name].Set(labels, metric.Value)
+				updates = updates + 1
 			}
 		}
 	}
+	return updates
 }
 
 func main() {
@@ -144,7 +154,8 @@ func main() {
 			if err != nil {
 				log.Fatalf("Can't connect to gmond: %s", err)
 			}
-			fetchMetrics(bufio.NewReader(conn))
+			updates := fetchMetrics(bufio.NewReader(conn))
+			log.Printf("%d metrics registered, %d values updated", len(gaugePerGangliaMetrics), updates)
 			time.Sleep(time.Duration(*gangliaScrapeInterval) * time.Second)
 		}
 	}()
