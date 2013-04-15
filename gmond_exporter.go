@@ -30,7 +30,7 @@ var (
 	listeningAddress       = flag.String("listeningAddress", ":8080", "Address on which to expose JSON metrics.")
 	metricsEndpoint        = flag.String("metricsEndpoint", "/metrics.json", "Path under which to expose JSON metrics.")
 	configFile             = flag.String("config", "gmond_exporter.conf", "config file.")
-	gangliaScrapeDelay     = flag.Int("gangliaScrapeDelay", 60, "Delay in seconds between scrapes. Abort scrapes taking longer than that.")
+	gangliaScrapeInterval     = flag.Int("gangliaScrapeInterval", 60, "Interval in seconds between scrapes. Abort scrapes taking longer than that.")
 	gaugePerGangliaMetrics map[string]metrics.Gauge
 )
 
@@ -142,7 +142,7 @@ func fetchMetrics(gangliaAddress string) (updates int, err error) {
 		log.Println("Can't connect to gmond")
 		return
 	}
-	conn.SetDeadline(time.Now().Add(time.Duration(*gangliaScrapeDelay * int(time.Second))))
+	conn.SetDeadline(time.Now().Add(time.Duration(*gangliaScrapeInterval * int(time.Second))))
 
 	ganglia := Ganglia{}
 	decoder := xml.NewDecoder(bufio.NewReader(conn))
@@ -231,6 +231,6 @@ func main() {
 			<-done
 		}
 
-		time.Sleep(time.Duration(*gangliaScrapeDelay) * time.Second)
+		time.Sleep(time.Duration(*gangliaScrapeInterval) * time.Second)
 	}
 }
