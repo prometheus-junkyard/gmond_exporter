@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/prometheus/client_golang"
+	"github.com/prometheus/client_golang/maths"
 	"github.com/prometheus/client_golang/metrics"
 	"io"
 	"io/ioutil"
@@ -192,7 +193,13 @@ func fetchMetrics(gangliaAddress string) (updates int, err error) {
 }
 
 func main() {
-	scrapeDuration := metrics.NewGauge()
+	DurationSpecification := &metrics.HistogramSpecification{
+		Starts:                metrics.LogarithmicSizedBucketsFor(0, 1000),
+		BucketBuilder:         metrics.AccumulatingBucketBuilder(metrics.EvictAndReplaceWith(10, maths.Average), 100),
+		ReportablePercentiles: []float64{0.01, 0.05, 0.5, 0.90, 0.99},
+	}
+
+	scrapeDuration := metrics.NewHistogram(DurationSpecification)
 	metricsUpdated := metrics.NewGauge()
 	metricsExported := metrics.NewGauge()
 	registry.DefaultRegistry.Register("gmond_exporter_scrape_duration_seconds", "gmond_exporter: Duration of a scrape job.", registry.NilLabels, scrapeDuration)
@@ -222,7 +229,7 @@ func main() {
 					log.Printf("OK (after %fs): %d metrics registered, %d values updated", duration.Seconds(), len(gaugePerGangliaMetrics), updates)
 					durationLabel = map[string]string{"result": "success"}
 				}
-				scrapeDuration.Set(durationLabel, duration.Seconds())
+				scrapeDuration.Add(durationLabel, duration.Seconds())
 				done <- true
 			}(addr)
 		}
