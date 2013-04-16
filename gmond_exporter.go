@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"flag"
+	"fmt"
 	"github.com/prometheus/client_golang"
 	"github.com/prometheus/client_golang/metrics"
 	"io"
@@ -30,7 +31,7 @@ var (
 	listeningAddress       = flag.String("listeningAddress", ":8080", "Address on which to expose JSON metrics.")
 	metricsEndpoint        = flag.String("metricsEndpoint", "/metrics.json", "Path under which to expose JSON metrics.")
 	configFile             = flag.String("config", "gmond_exporter.conf", "config file.")
-	gangliaScrapeInterval     = flag.Int("gangliaScrapeInterval", 60, "Interval in seconds between scrapes. Abort scrapes taking longer than that.")
+	gangliaScrapeInterval  = flag.Int("gangliaScrapeInterval", 60, "Interval in seconds between scrapes. Abort scrapes taking longer than that.")
 	gaugePerGangliaMetrics map[string]metrics.Gauge
 )
 
@@ -139,10 +140,9 @@ func fetchMetrics(gangliaAddress string) (updates int, err error) {
 	log.Printf("Scraping %s", gangliaAddress)
 	conn, err := net.Dial(proto, gangliaAddress)
 	if err != nil {
-		log.Println("Can't connect to gmond")
-		return
+		return updates, fmt.Errorf("Can't connect to gmond: %s", err)
 	}
-	conn.SetDeadline(time.Now().Add(time.Duration(*gangliaScrapeInterval * int(time.Second))))
+	conn.SetDeadline(time.Now().Add(time.Duration(*gangliaScrapeInterval) * time.Second))
 
 	ganglia := Ganglia{}
 	decoder := xml.NewDecoder(bufio.NewReader(conn))
@@ -150,8 +150,7 @@ func fetchMetrics(gangliaAddress string) (updates int, err error) {
 
 	err = decoder.Decode(&ganglia)
 	if err != nil {
-		log.Println("Couldn't parse xml")
-		return
+		return updates, fmt.Errorf("Couldn't parse xml: %s", err)
 	}
 
 	for _, cluster := range ganglia.Clusters {
@@ -196,7 +195,7 @@ func main() {
 	scrapeDuration := metrics.NewGauge()
 	metricsUpdated := metrics.NewGauge()
 	metricsExported := metrics.NewGauge()
-	registry.DefaultRegistry.Register("gmond_exporter_scape_duration_seconds", "gmond_exporter: Duration of a scape job.", registry.NilLabels, scrapeDuration)
+	registry.DefaultRegistry.Register("gmond_exporter_scrape_duration_seconds", "gmond_exporter: Duration of a scrape job.", registry.NilLabels, scrapeDuration)
 	registry.DefaultRegistry.Register("gmond_exporter_metrics_updated_count", "gmond_exporter: Number of metrics updated.", registry.NilLabels, metricsUpdated)
 	registry.DefaultRegistry.Register("gmond_exporter_metrics_exported_count", "gmond_exporter: Number of metrics exported.", registry.NilLabels, metricsExported)
 
