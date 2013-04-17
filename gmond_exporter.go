@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -213,9 +214,9 @@ func main() {
 		case conf = <-configChan:
 			log.Printf("Got new config")
 		default:
-			done := make(chan bool, len(conf.Endpoints))
+			wg := &sync.WaitGroup{}
+			wg.Add(len(conf.Endpoints))
 			for _, addr := range conf.Endpoints {
-
 				go func(addr string) {
 					begin := time.Now()
 					updates, err := fetchMetrics(addr)
@@ -234,12 +235,10 @@ func main() {
 						durationLabel = map[string]string{"result": "success"}
 					}
 					scrapeDuration.Add(durationLabel, duration.Seconds())
-					done <- true
+					wg.Done()
 				}(addr)
 			}
-			for i := 0; i < len(conf.Endpoints); i++ {
-				<-done
-			}
+			wg.Wait()
 			time.Sleep(*gangliaScrapeInterval)
 		}
 	}
