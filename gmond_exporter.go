@@ -126,7 +126,7 @@ func fetchMetrics(gangliaAddress string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("Can't connect to gmond: %s", err)
 	}
-	conn.SetDeadline(time.Now().Add(time.Duration(*gangliaScrapeInterval) * time.Second))
+	conn.SetDeadline(time.Now().Add(*gangliaScrapeInterval))
 
 	ganglia := Ganglia{}
 	decoder := xml.NewDecoder(bufio.NewReader(conn))
