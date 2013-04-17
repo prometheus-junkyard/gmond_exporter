@@ -28,12 +28,15 @@ const (
 )
 
 var (
-	verbose                = flag.Bool("verbose", false, "Verbose output.")
-	listeningAddress       = flag.String("listeningAddress", ":8080", "Address on which to expose JSON metrics.")
-	metricsEndpoint        = flag.String("metricsEndpoint", "/metrics.json", "Path under which to expose JSON metrics.")
-	configFile             = flag.String("config", "gmond_exporter.conf", "config file.")
-	gangliaScrapeInterval  = flag.Duration("gangliaScrapeInterval", 1*time.Minute, "Interval between scrapes.")
-	gaugePerGangliaMetrics map[string]metrics.Gauge
+	verbose               = flag.Bool("verbose", false, "Verbose output.")
+	listeningAddress      = flag.String("listeningAddress", ":8080", "Address on which to expose JSON metrics.")
+	metricsEndpoint       = flag.String("metricsEndpoint", "/metrics.json", "Path under which to expose JSON metrics.")
+	configFile            = flag.String("config", "gmond_exporter.conf", "config file.")
+	gangliaScrapeInterval = flag.Duration("gangliaScrapeInterval", 1*time.Minute, "Interval between scrapes.")
+)
+
+var (
+	gaugePerGangliaMetrics = map[string]metrics.Gauge{}
 )
 
 type config struct {
@@ -174,7 +177,7 @@ func fetchMetrics(gangliaAddress string) (int, error) {
 
 func main() {
 	flag.Parse()
-	gaugePerGangliaMetrics = make(map[string]metrics.Gauge)
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGHUP)
 	configChan := make(chan config)
