@@ -31,7 +31,7 @@ var (
 	listeningAddress       = flag.String("listeningAddress", ":8080", "Address on which to expose JSON metrics.")
 	metricsEndpoint        = flag.String("metricsEndpoint", "/metrics.json", "Path under which to expose JSON metrics.")
 	configFile             = flag.String("config", "gmond_exporter.conf", "config file.")
-	gangliaScrapeInterval  = flag.Int("gangliaScrapeInterval", 60, "Interval in seconds between scrapes. Abort scrapes taking longer than that.")
+	gangliaScrapeInterval  = flag.Duration("gangliaScrapeInterval", 1*time.Minute, "Interval between scrapes.")
 	gaugePerGangliaMetrics map[string]metrics.Gauge
 )
 
@@ -240,7 +240,7 @@ func main() {
 			for i := 0; i < len(conf.Endpoints); i++ {
 				<-done
 			}
-			time.Sleep(time.Duration(*gangliaScrapeInterval) * time.Second)
+			time.Sleep(*gangliaScrapeInterval)
 		}
 	}
 }
