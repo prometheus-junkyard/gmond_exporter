@@ -88,15 +88,16 @@ type Ganglia struct {
 	Clusters []Cluster `xml:"CLUSTER"`
 }
 
-func readConfig() (conf config, err error) {
+func readConfig() (config, error) {
 	log.Printf("reading config %s", *configFile)
 	bytes, err := ioutil.ReadFile(*configFile)
 	if err != nil {
-		return
+		return config{}, err
 	}
 
-	err = json.Unmarshal(bytes, &conf)
-	return
+	var c config
+	err = json.Unmarshal(bytes, &c)
+	return c, err
 }
 
 func debug(format string, a ...interface{}) {
@@ -116,11 +117,11 @@ func toUtf8(charset string, input io.Reader) (io.Reader, error) {
 	return input, nil //FIXME
 }
 
-func fetchMetrics(gangliaAddress string) (updates int, err error) {
+func fetchMetrics(gangliaAddress string) (int, error) {
 	log.Printf("Scraping %s", gangliaAddress)
 	conn, err := net.Dial(proto, gangliaAddress)
 	if err != nil {
-		return updates, fmt.Errorf("Can't connect to gmond: %s", err)
+		return 0, fmt.Errorf("Can't connect to gmond: %s", err)
 	}
 	conn.SetDeadline(time.Now().Add(time.Duration(*gangliaScrapeInterval) * time.Second))
 
@@ -130,12 +131,12 @@ func fetchMetrics(gangliaAddress string) (updates int, err error) {
 
 	err = decoder.Decode(&ganglia)
 	if err != nil {
-		return updates, fmt.Errorf("Couldn't parse xml: %s", err)
+		return 0, fmt.Errorf("Couldn't parse xml: %s", err)
 	}
 
+	updates := 0
 	for _, cluster := range ganglia.Clusters {
 		for _, host := range cluster.Hosts {
-
 			for _, metric := range host.Metrics {
 				name := strings.ToLower(metric.Name)
 				if _, ok := gaugePerGangliaMetrics[name]; !ok {
@@ -164,11 +165,11 @@ func fetchMetrics(gangliaAddress string) (updates int, err error) {
 				}
 				debug("%s{%s} = %f", name, labels, metric.Value)
 				gaugePerGangliaMetrics[name].Set(labels, metric.Value)
-				updates = updates + 1
+				updates++
 			}
 		}
 	}
-	return
+	return updates, nil
 }
 
 func main() {
