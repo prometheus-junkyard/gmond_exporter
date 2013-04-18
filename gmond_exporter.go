@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -27,13 +28,18 @@ const (
 )
 
 var (
-	verbose                = flag.Bool("verbose", false, "Verbose output.")
-	listeningAddress       = flag.String("listeningAddress", ":8080", "Address on which to expose JSON metrics.")
-	metricsEndpoint        = flag.String("metricsEndpoint", "/metrics.json", "Path under which to expose JSON metrics.")
-	configFile             = flag.String("config", "gmond_exporter.conf", "config file.")
-	gangliaScrapeInterval  = flag.Int("gangliaScrapeInterval", 60, "Interval in seconds between scrapes. Abort scrapes taking longer than that.")
-	gaugePerGangliaMetrics map[string]metrics.Gauge
+	verbose               = flag.Bool("verbose", false, "Verbose output.")
+	listeningAddress      = flag.String("listeningAddress", ":8080", "Address on which to expose JSON metrics.")
+	metricsEndpoint       = flag.String("metricsEndpoint", "/metrics.json", "Path under which to expose JSON metrics.")
+	configFile            = flag.String("config", "gmond_exporter.conf", "config file.")
+	gangliaScrapeInterval = flag.Int("gangliaScrapeInterval", 60, "Interval in seconds between scrapes. Abort scrapes taking longer than that.")
+	exportedState         gangliaMetrics
 )
+
+type gangliaMetrics struct {
+	sync.RWMutex
+	Metrics map[string]metrics.Gauge
+}
 
 type config struct {
 	Endpoints []string `json:"endpoints"`
@@ -104,6 +110,19 @@ func debug(format string, a ...interface{}) {
 	}
 }
 
+func setState(name string, labels map[string]string, value float64) {
+  exportedState.Lock()
+	exportedState.Metrics[name].Set(labels, value)
+	exportedState.Unlock()
+}
+
+func stateLen() (i int) {
+	exportedState.Lock()
+	i = len(exportedState.Metrics)
+	exportedState.Unlock()
+	return i
+}
+
 func serveStatus() {
 	exporter := registry.DefaultRegistry.Handler()
 
@@ -137,7 +156,9 @@ func fetchMetrics(gangliaAddress string) (updates int, err error) {
 
 			for _, metric := range host.Metrics {
 				name := strings.ToLower(metric.Name)
-				if _, ok := gaugePerGangliaMetrics[name]; !ok {
+
+				exportedState.Lock()
+				if _, ok := exportedState.Metrics[name]; !ok {
 					var desc string
 					var title string
 					for _, element := range metric.ExtraData.ExtraElements {
@@ -153,16 +174,17 @@ func fetchMetrics(gangliaAddress string) (updates int, err error) {
 					}
 					debug("New metric: %s (%s)", name, desc)
 					gauge := metrics.NewGauge()
-					gaugePerGangliaMetrics[name] = gauge
+					exportedState.Metrics[name] = gauge
 					registry.DefaultRegistry.Register(name, desc, registry.NilLabels, gauge) // one gauge per metric!
 				}
+				exportedState.Unlock()
 
 				var labels = map[string]string{
 					"hostname": host.Name,
 					"cluster":  cluster.Name,
 				}
 				debug("%s{%s} = %f", name, labels, metric.Value)
-				gaugePerGangliaMetrics[name].Set(labels, metric.Value)
+				setState(name, labels, metric.Value)
 				updates = updates + 1
 			}
 		}
@@ -172,7 +194,7 @@ func fetchMetrics(gangliaAddress string) (updates int, err error) {
 
 func main() {
 	flag.Parse()
-	gaugePerGangliaMetrics = make(map[string]metrics.Gauge)
+	exportedState = gangliaMetrics{Metrics: make(map[string]metrics.Gauge)}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGHUP)
 	configChan := make(chan config)
@@ -229,8 +251,8 @@ func main() {
 						durationLabel = map[string]string{"result": "error"}
 					} else {
 						metricsUpdated.Set(endpointLabel, float64(updates))
-						metricsExported.Set(map[string]string{}, float64(len(gaugePerGangliaMetrics)))
-						log.Printf("OK (after %fs): %d metrics registered, %d values updated", duration.Seconds(), len(gaugePerGangliaMetrics), updates)
+						metricsExported.Set(map[string]string{}, float64(stateLen()))
+						log.Printf("OK (after %fs): %d metrics registered, %d values updated", duration.Seconds(), stateLen(), updates)
 						durationLabel = map[string]string{"result": "success"}
 					}
 					scrapeDuration.Add(durationLabel, duration.Seconds())
