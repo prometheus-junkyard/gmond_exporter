@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -27,12 +28,15 @@ const (
 )
 
 var (
-	verbose                = flag.Bool("verbose", false, "Verbose output.")
-	listeningAddress       = flag.String("listeningAddress", ":8080", "Address on which to expose JSON metrics.")
-	metricsEndpoint        = flag.String("metricsEndpoint", "/metrics.json", "Path under which to expose JSON metrics.")
-	configFile             = flag.String("config", "gmond_exporter.conf", "config file.")
-	gangliaScrapeInterval  = flag.Int("gangliaScrapeInterval", 60, "Interval in seconds between scrapes. Abort scrapes taking longer than that.")
-	gaugePerGangliaMetrics map[string]metrics.Gauge
+	verbose               = flag.Bool("verbose", false, "Verbose output.")
+	listeningAddress      = flag.String("listeningAddress", ":8080", "Address on which to expose JSON metrics.")
+	metricsEndpoint       = flag.String("metricsEndpoint", "/metrics.json", "Path under which to expose JSON metrics.")
+	configFile            = flag.String("config", "gmond_exporter.conf", "config file.")
+	gangliaScrapeInterval = flag.Duration("gangliaScrapeInterval", 1*time.Minute, "Interval between scrapes.")
+)
+
+var (
+	gaugePerGangliaMetrics = map[string]metrics.Gauge{}
 )
 
 type config struct {
@@ -87,15 +91,16 @@ type Ganglia struct {
 	Clusters []Cluster `xml:"CLUSTER"`
 }
 
-func readConfig() (conf config, err error) {
+func readConfig() (config, error) {
 	log.Printf("reading config %s", *configFile)
 	bytes, err := ioutil.ReadFile(*configFile)
 	if err != nil {
-		return
+		return config{}, err
 	}
 
-	err = json.Unmarshal(bytes, &conf)
-	return
+	var c config
+	err = json.Unmarshal(bytes, &c)
+	return c, err
 }
 
 func debug(format string, a ...interface{}) {
@@ -115,13 +120,13 @@ func toUtf8(charset string, input io.Reader) (io.Reader, error) {
 	return input, nil //FIXME
 }
 
-func fetchMetrics(gangliaAddress string) (updates int, err error) {
+func fetchMetrics(gangliaAddress string) (int, error) {
 	log.Printf("Scraping %s", gangliaAddress)
 	conn, err := net.Dial(proto, gangliaAddress)
 	if err != nil {
-		return updates, fmt.Errorf("Can't connect to gmond: %s", err)
+		return 0, fmt.Errorf("Can't connect to gmond: %s", err)
 	}
-	conn.SetDeadline(time.Now().Add(time.Duration(*gangliaScrapeInterval) * time.Second))
+	conn.SetDeadline(time.Now().Add(*gangliaScrapeInterval))
 
 	ganglia := Ganglia{}
 	decoder := xml.NewDecoder(bufio.NewReader(conn))
@@ -129,12 +134,12 @@ func fetchMetrics(gangliaAddress string) (updates int, err error) {
 
 	err = decoder.Decode(&ganglia)
 	if err != nil {
-		return updates, fmt.Errorf("Couldn't parse xml: %s", err)
+		return 0, fmt.Errorf("Couldn't parse xml: %s", err)
 	}
 
+	updates := 0
 	for _, cluster := range ganglia.Clusters {
 		for _, host := range cluster.Hosts {
-
 			for _, metric := range host.Metrics {
 				name := strings.ToLower(metric.Name)
 				if _, ok := gaugePerGangliaMetrics[name]; !ok {
@@ -163,16 +168,16 @@ func fetchMetrics(gangliaAddress string) (updates int, err error) {
 				}
 				debug("%s{%s} = %f", name, labels, metric.Value)
 				gaugePerGangliaMetrics[name].Set(labels, metric.Value)
-				updates = updates + 1
+				updates++
 			}
 		}
 	}
-	return
+	return updates, nil
 }
 
 func main() {
 	flag.Parse()
-	gaugePerGangliaMetrics = make(map[string]metrics.Gauge)
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGHUP)
 	configChan := make(chan config)
@@ -213,9 +218,9 @@ func main() {
 		case conf = <-configChan:
 			log.Printf("Got new config")
 		default:
-			done := make(chan bool, len(conf.Endpoints))
+			wg := sync.WaitGroup{}
+			wg.Add(len(conf.Endpoints))
 			for _, addr := range conf.Endpoints {
-
 				go func(addr string) {
 					begin := time.Now()
 					updates, err := fetchMetrics(addr)
@@ -234,13 +239,11 @@ func main() {
 						durationLabel = map[string]string{"result": "success"}
 					}
 					scrapeDuration.Add(durationLabel, duration.Seconds())
-					done <- true
+					wg.Done()
 				}(addr)
 			}
-			for i := 0; i < len(conf.Endpoints); i++ {
-				<-done
-			}
-			time.Sleep(time.Duration(*gangliaScrapeInterval) * time.Second)
+			wg.Wait()
+			time.Sleep(*gangliaScrapeInterval)
 		}
 	}
 }
