@@ -218,7 +218,7 @@ func main() {
 		case conf = <-configChan:
 			log.Printf("Got new config")
 		default:
-			wg := &sync.WaitGroup{}
+			wg := sync.WaitGroup{}
 			wg.Add(len(conf.Endpoints))
 			for _, addr := range conf.Endpoints {
 				go func(addr string) {
