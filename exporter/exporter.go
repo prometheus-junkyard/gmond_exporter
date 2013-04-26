@@ -177,7 +177,6 @@ func (e *exporter) Loop() {
 			case <-ticker:
 				log.Printf("Starting new scrape interval")
 				e.scrapeAll()
-				time.Sleep(e.gangliaScrapeInterval)
 		}
 	}
 }
