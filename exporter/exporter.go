@@ -182,7 +182,8 @@ func (e *exporter) Loop() {
 }
 
 func (e *exporter) scrapeAll() {
-	done := make(chan bool, len(e.conf.Endpoints))
+	wg := sync.WaitGroup{}
+	wg.Add(len(e.conf.Endpoints))
 	for _, addr := range e.conf.Endpoints {
 
 		go func(addr string) {
@@ -203,12 +204,10 @@ func (e *exporter) scrapeAll() {
 				durationLabel = map[string]string{"result": "success"}
 			}
 			e.scrapeDuration.Add(durationLabel, duration.Seconds())
-			done <- true
+			wg.Done()
 		}(addr)
 	}
-	for i := 0; i < len(e.conf.Endpoints); i++ {
-		<-done
-	}
+	wg.Wait()
 }
 
 func (e *exporter) fetchMetrics(gangliaAddress string) (updates int, err error) {
