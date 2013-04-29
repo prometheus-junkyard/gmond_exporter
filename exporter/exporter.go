@@ -6,14 +6,13 @@ import (
 	"encoding/xml"
 	"flag"
 	"fmt"
-	"github.com/prometheus/client_golang"
-	"github.com/prometheus/client_golang/metrics"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/exp"
 	"io"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -32,7 +31,6 @@ var verbose = flag.Bool("verbose", false, "Verbose output.")
 type config struct {
 	Endpoints             []string `json:"endpoints"`
 	ListeningAddress      string   `json:"listeningAddress"`
-	MetricsEndpoint       string   `json:"metricsEndpoint"`
 	GangliaScrapeInterval int      `json:"gangliaScrapeInterval"`
 }
 
@@ -50,19 +48,18 @@ func toUtf8(charset string, input io.Reader) (io.Reader, error) {
 // The gmond exporter.
 type exporter struct {
 	sync.RWMutex
-	Metrics               map[string]metrics.Gauge
+	Metrics               map[string]prometheus.Gauge
 	configFile            string
 	listeningAddress      string
 	gangliaScrapeInterval time.Duration
 
 	verbose         bool
-	metricsEndpoint string
 	conf            config
 	configChan      chan config
 
-	scrapeDuration  metrics.Histogram
-	metricsUpdated  metrics.Gauge
-	metricsExported metrics.Gauge
+	scrapeDuration  prometheus.Histogram
+	metricsUpdated  prometheus.Gauge
+	metricsExported prometheus.Gauge
 }
 
 func (e *exporter) setMetric(name string, labels map[string]string, metric Metric) {
@@ -84,9 +81,9 @@ func (e *exporter) setMetric(name string, labels map[string]string, metric Metri
 			}
 		}
 		debug("New metric: %s (%s)", name, desc)
-		gauge := metrics.NewGauge()
+		gauge := prometheus.NewGauge()
 		e.Metrics[name] = gauge
-		registry.Register(name, desc, registry.NilLabels, gauge) // one gauge per metric!
+		prometheus.Register(name, desc, prometheus.NilLabels, gauge) // one gauge per metric!
 	}
 	e.Metrics[name].Set(labels, metric.Value)
 }
@@ -98,7 +95,7 @@ func (e *exporter) stateLen() (int) {
 }
 
 func (e *exporter) readConfig() (conf config, err error) {
-	log.Printf("reading config %s", e.configFile)
+	log.Printf("Reading config %s", e.configFile)
 	bytes, err := ioutil.ReadFile(e.configFile)
 	if err != nil {
 		return
@@ -118,21 +115,20 @@ func (e *exporter) reloadConfig() {
 }
 
 func (e exporter) serveStatus() {
-	http.Handle(e.metricsEndpoint, registry.DefaultHandler)
-	http.ListenAndServe(e.listeningAddress, nil)
+	exp.Handle(prometheus.ExpositionResource, prometheus.DefaultHandler)
+	http.ListenAndServe(e.listeningAddress, exp.DefaultCoarseMux)
 }
 
 func New(configFile string) (e exporter, err error) {
 
 	e = exporter{
 		configFile:            configFile,
-		Metrics:               make(map[string]metrics.Gauge),
-		scrapeDuration:        metrics.NewDefaultHistogram(),
-		metricsUpdated:        metrics.NewGauge(),
-		metricsExported:       metrics.NewGauge(),
+		Metrics:               make(map[string]prometheus.Gauge),
+		scrapeDuration:        prometheus.NewDefaultHistogram(),
+		metricsUpdated:        prometheus.NewGauge(),
+		metricsExported:       prometheus.NewGauge(),
 		configChan:            make(chan config),
 		listeningAddress:      ":8080",
-		metricsEndpoint:       "/metrics.json",
 		gangliaScrapeInterval: 60 * time.Second,
 	}
 
@@ -145,16 +141,14 @@ func New(configFile string) (e exporter, err error) {
 	if conf.ListeningAddress != "" {
 		e.listeningAddress = conf.ListeningAddress
 	}
-	if conf.MetricsEndpoint != "" {
-		e.metricsEndpoint = conf.MetricsEndpoint
-	}
 	if conf.GangliaScrapeInterval != 0 {
 		e.gangliaScrapeInterval = time.Duration(conf.GangliaScrapeInterval) * time.Second
 	}
 
-	registry.Register("gmond_exporter_scrape_duration_seconds", "gmond_exporter: Duration of a scrape job.", registry.NilLabels, e.scrapeDuration)
-	registry.Register("gmond_exporter_metrics_updated_count", "gmond_exporter: Number of metrics updated.", registry.NilLabels, e.metricsUpdated)
-	registry.Register("gmond_exporter_metrics_exported_count", "gmond_exporter: Number of metrics exported.", registry.NilLabels, e.metricsExported)
+	prometheus.Register("gmond_exporter_scrape_duration_seconds", "gmond_exporter: Duration of a scrape job.", prometheus.NilLabels, e.scrapeDuration)
+	prometheus.Register("gmond_exporter_metrics_updated_count", "gmond_exporter: Number of metrics updated.", prometheus.NilLabels, e.metricsUpdated)
+	prometheus.Register("gmond_exporter_metrics_exported_count", "gmond_exporter: Number of metrics exported.", prometheus.NilLabels, e.metricsExported)
+	debug("Registered internal metrics")
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGHUP)
@@ -169,6 +163,7 @@ func New(configFile string) (e exporter, err error) {
 }
 
 func (e *exporter) Loop() {
+	debug("Loop initialized, running every %s", e.gangliaScrapeInterval)
 	ticker := time.Tick(e.gangliaScrapeInterval)
 	for {
 		select {
